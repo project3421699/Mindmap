@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "ng serve",
-    "build": "react-scripts build",
+    "build": "ng build",
     "preview": "ng serve --configuration=production"
   },
   "dependencies": {
@@ -16,6 +16,7 @@
     "@google/genai": "^1.30.0",
     "@angular/forms": "^21.0.2",
     "jspdf": "2.5.1",
+    "d3": "7.9.0",
     "@angular/build": "^21.0.0",
     "@angular/cli": "^21.0.0",
     "@angular/common": "^21.0.0",

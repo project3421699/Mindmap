@@ -2,8 +2,7 @@
 import { Component, ElementRef, effect, input, viewChild, HostListener, signal } from '@angular/core';
 import { MindMapNode } from '../services/markdown-parser.service';
 import { jsPDF } from 'jspdf';
-
-declare const d3: any;
+import * as d3 from 'd3';
 
 @Component({
   selector: 'app-viewer',
