@@ -57,14 +57,15 @@ export class ViewerComponent {
   private allNodes: any[] = []; 
   
   // Configuration
-  private readonly MAX_LINE_CHARS = 20; // Slightly tighter wrapping
-  private readonly LINE_HEIGHT = 18;
-  private readonly NODE_PADDING_X = 24;
-  private readonly NODE_PADDING_Y = 16;
+  private readonly MAX_LINE_CHARS = 24; 
+  private readonly LINE_HEIGHT = 20;
+  private readonly NODE_PADDING_X = 28;
+  private readonly NODE_PADDING_Y = 20;
   
   constructor() {
     effect(() => {
       const mindMapData = this.data();
+      // Ensure container is ready
       if (mindMapData && this.svgContainer()) {
         this.updateChart(mindMapData);
       }
@@ -88,13 +89,11 @@ export class ViewerComponent {
     return lines;
   }
 
-  // Pre-calculate size for each node
   private processData(node: any) {
     const lines = this.wrapText(node.name);
-    // Estimate width: simplified char width average (e.g. 8px per char)
-    // Max width limited by wrapping, but we want the actual box to fit the longest line
+    // Rough character width estimation
     const maxLineLen = Math.max(...lines.map(l => l.length));
-    const width = Math.max(120, (maxLineLen * 8) + this.NODE_PADDING_X * 2); 
+    const width = Math.max(140, (maxLineLen * 9) + this.NODE_PADDING_X * 2); 
     const height = (lines.length * this.LINE_HEIGHT) + this.NODE_PADDING_Y * 2;
     
     return {
@@ -105,7 +104,6 @@ export class ViewerComponent {
     };
   }
   
-  // Recursive map to process entire tree
   private mapData(node: any): any {
     const processed = this.processData(node);
     if (node.children) {
@@ -116,15 +114,16 @@ export class ViewerComponent {
 
   private updateChart(rawData: MindMapNode) {
     const container = this.svgContainer()!.nativeElement;
+    // Clear previous
     d3.select(container).selectAll('*').remove();
 
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // 1. Pre-process data for dimensions
+    // 1. Pre-process dimensions
     const processedRoot = this.mapData(rawData);
 
-    // 2. Split Data (Left/Right)
+    // 2. Split Data (Balanced Left/Right)
     const rightChildren: any[] = [];
     const leftChildren: any[] = [];
 
@@ -139,28 +138,27 @@ export class ViewerComponent {
     const leftRoot = d3.hierarchy({ ...processedRoot, children: leftChildren });
 
     // 3. Layout Configuration
-    // dx: Vertical spacing between nodes (Increased significantly to prevent overlapping pink nodes)
-    // dy: Horizontal spacing between levels
-    const dx = 200; 
-    const dy = 320; 
+    // dx: Vertical spacing (Node Height + Gap). 220px ensures tall nodes don't overlap vertically.
+    // dy: Horizontal spacing (Node Width + Gap). 350px ensures wide nodes don't overlap horizontally.
+    const dx = 220; 
+    const dy = 350; 
 
-    // Create tree layout with custom separation
     const tree = d3.tree()
       .nodeSize([dx, dy])
       .separation((a: any, b: any) => {
-          // Add extra space between cousins to prevent sub-tree overlap
-          return a.parent === b.parent ? 1 : 1.4;
+          // Increase separation for different parents (cousins) to prevent branch overlap
+          return a.parent === b.parent ? 1.1 : 2.5; 
       });
 
     tree(rightRoot);
     tree(leftRoot);
 
-    // Invert left side horizontal coordinate
+    // Invert left side
     leftRoot.descendants().forEach((d: any) => {
       d.y = -d.y;
     });
 
-    // Merge nodes
+    // Merge
     const nodes = rightRoot.descendants().concat(leftRoot.descendants().slice(1));
     const links = rightRoot.links().concat(leftRoot.links());
     
@@ -171,7 +169,7 @@ export class ViewerComponent {
         .range(["#60a5fa", "#34d399", "#f472b6", "#a78bfa", "#fbbf24", "#f87171"]);
 
     this.zoom = d3.zoom()
-      .scaleExtent([0.1, 3])
+      .scaleExtent([0.05, 4])
       .on('zoom', (event: any) => {
         this.g.attr('transform', event.transform);
       });
@@ -184,7 +182,6 @@ export class ViewerComponent {
       .call(this.zoom)
       .on("dblclick.zoom", null);
 
-    // Add a rect to catch zoom events on empty space
     this.svg.append("rect")
         .attr("width", width)
         .attr("height", height)
@@ -194,7 +191,7 @@ export class ViewerComponent {
     this.g = this.svg.append('g')
       .attr('transform', `translate(${width / 2},${height / 2})`);
 
-    // Links
+    // Draw Links
     this.g.selectAll('.link')
       .data(links)
       .enter()
@@ -203,13 +200,13 @@ export class ViewerComponent {
       .attr('fill', 'none')
       .attr('stroke', '#475569')
       .attr('stroke-width', 1.5)
-      .attr('opacity', 0.6)
+      .attr('opacity', 0.5)
       .attr('d', d3.linkHorizontal()
           .x((d: any) => d.y)
           .y((d: any) => d.x)
       );
 
-    // Nodes
+    // Draw Nodes
     const node = this.g.selectAll('.node')
       .data(nodes)
       .enter()
@@ -217,37 +214,39 @@ export class ViewerComponent {
       .attr('class', 'node')
       .attr('transform', (d: any) => `translate(${d.y},${d.x})`);
 
-    // Node Background Rects
+    // Node Background
     node.append('rect')
-      .attr('rx', 8)
-      .attr('ry', 8)
-      .attr('x', (d: any) => -d.data._width / 2) // Center horizontally
-      .attr('y', (d: any) => -d.data._height / 2) // Center vertically
+      .attr('rx', 12)
+      .attr('ry', 12)
+      .attr('x', (d: any) => -d.data._width / 2) 
+      .attr('y', (d: any) => -d.data._height / 2)
       .attr('width', (d: any) => d.data._width)
       .attr('height', (d: any) => d.data._height)
-      .attr('fill', '#1e293b')
+      .attr('fill', '#1e293b') // Dark slate background
       .attr('stroke', (d: any) => colorScale(d.depth))
-      .attr('stroke-width', 2);
+      .attr('stroke-width', 2)
+      .style('filter', 'drop-shadow(0 4px 6px rgba(0,0,0,0.3))');
 
-    // Node Text (Multi-line)
+    // Node Text
     const textGroup = node.append('text')
       .attr('text-anchor', 'middle')
-      .style('font-family', 'sans-serif')
+      .style('font-family', 'ui-sans-serif, system-ui, sans-serif')
       .style('font-size', '14px')
       .style('font-weight', '500')
-      .style('fill', '#e2e8f0');
+      .style('fill', '#f1f5f9');
 
     textGroup.each(function(d: any) {
        const el = d3.select(this);
        const lines = d.data._lines;
-       // Calculate starting y to center the block of text vertically
-       const totalTextHeight = lines.length * 18; // approx line height
-       let startY = -(totalTextHeight / 2) + 5; // +5 for baseline adjustment
+       const lineHeight = 20;
+       const totalTextHeight = lines.length * lineHeight;
+       // Vertical centering adjustment
+       let startY = -(totalTextHeight / 2) + (lineHeight / 3); 
 
        lines.forEach((line: string, i: number) => {
          el.append('tspan')
            .attr('x', 0)
-           .attr('dy', i === 0 ? startY + 9 : 18) // First line absolute, others relative
+           .attr('dy', i === 0 ? startY + (lineHeight/2) : lineHeight)
            .text(line);
        });
     });
@@ -263,7 +262,7 @@ export class ViewerComponent {
 
     this.svg.transition().duration(750).call(
       this.zoom.transform,
-      d3.zoomIdentity.translate(width / 2, height / 2).scale(0.8)
+      d3.zoomIdentity.translate(width / 2, height / 2).scale(0.85)
     );
   }
 
@@ -273,7 +272,6 @@ export class ViewerComponent {
 
     setTimeout(async () => {
       try {
-        // 1. Calculate Bounding Box
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         
         this.allNodes.forEach((d: any) => {
@@ -291,11 +289,10 @@ export class ViewerComponent {
           if (bottom > maxY) maxY = bottom;
         });
 
-        const padding = 80;
+        const padding = 100;
         const totalWidth = (maxX - minX) + (padding * 2);
         const totalHeight = (maxY - minY) + (padding * 2);
 
-        // 2. Clone SVG
         const originalSvg = this.svg.node();
         const clonedSvg = originalSvg.cloneNode(true);
         
@@ -303,14 +300,12 @@ export class ViewerComponent {
         clonedSvg.setAttribute('height', totalHeight);
         clonedSvg.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
         
-        // Remove the background rect we added for zooming
         const rect = clonedSvg.querySelector('rect');
         if(rect) rect.remove();
 
         const g = clonedSvg.querySelector('g');
         g.setAttribute('transform', `translate(${-minX + padding}, ${-minY + padding})`);
 
-        // 3. Serialize & Rasterize
         const serializer = new XMLSerializer();
         const svgString = serializer.serializeToString(clonedSvg);
         
@@ -330,8 +325,7 @@ export class ViewerComponent {
             return;
           }
 
-          // Dark Background for PDF
-          ctx.fillStyle = '#020617';
+          ctx.fillStyle = '#0f172a'; // Match bg-slate-900
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           
           ctx.scale(scale, scale);
