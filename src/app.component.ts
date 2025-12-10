@@ -89,7 +89,15 @@ import { ViewerComponent } from './components/viewer.component';
           <div class="px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center">
             <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Markdown Editor</span>
             <div class="flex gap-3">
-              <button (click)="copyToClipboard()" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">Copy</button>
+              <button 
+                (click)="copyToClipboard()" 
+                class="text-xs transition-colors"
+                [class.text-green-400]="isCopied()"
+                [class.text-blue-400]="!isCopied()"
+                [class.hover:text-blue-300]="!isCopied()"
+              >
+                {{ isCopied() ? 'Copied!' : 'Copy' }}
+              </button>
               <button (click)="clearEditor()" class="text-xs text-slate-500 hover:text-slate-300 transition-colors">Clear</button>
             </div>
           </div>
@@ -144,6 +152,7 @@ export class AppComponent {
 
   isGenerating = signal(false);
   errorMessage = signal<string | null>(null);
+  isCopied = signal(false);
 
   // Computed state for the viewer
   parsedData = computed(() => {
@@ -189,7 +198,10 @@ export class AppComponent {
 
   copyToClipboard() {
     const val = this.markdownControl.value;
-    navigator.clipboard.writeText(val);
+    navigator.clipboard.writeText(val).then(() => {
+      this.isCopied.set(true);
+      setTimeout(() => this.isCopied.set(false), 2000);
+    });
   }
 
   clearEditor() {
