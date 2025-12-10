@@ -1,3 +1,4 @@
+
 import { Component, computed, inject, signal } from '@angular/core';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { MarkdownParserService } from './services/markdown-parser.service';
@@ -8,9 +9,39 @@ import { ViewerComponent } from './components/viewer.component';
   selector: 'app-root',
   imports: [ReactiveFormsModule, ViewerComponent],
   template: `
-    <div class="flex h-screen w-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
+    <div class="flex flex-col md:flex-row h-screen w-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
+      
+      <!-- Mobile Tab Navigation (Visible only on mobile) -->
+      <div class="md:hidden flex h-12 bg-slate-900 border-b border-slate-800 shrink-0 z-20 shadow-md">
+        <button 
+          (click)="setMobileTab('editor')" 
+          class="flex-1 text-sm font-medium transition-colors border-b-2"
+          [class.border-blue-500]="mobileTab() === 'editor'"
+          [class.text-blue-400]="mobileTab() === 'editor'"
+          [class.border-transparent]="mobileTab() !== 'editor'"
+          [class.text-slate-400]="mobileTab() !== 'editor'"
+        >
+          Editor
+        </button>
+        <button 
+          (click)="setMobileTab('map')" 
+          class="flex-1 text-sm font-medium transition-colors border-b-2"
+          [class.border-blue-500]="mobileTab() === 'map'"
+          [class.text-blue-400]="mobileTab() === 'map'"
+          [class.border-transparent]="mobileTab() !== 'map'"
+          [class.text-slate-400]="mobileTab() !== 'map'"
+        >
+          Preview Map
+        </button>
+      </div>
+
       <!-- Left Sidebar: Editor & Controls -->
-      <div class="flex flex-col w-96 border-r border-slate-800 bg-slate-900 shadow-xl z-10 shrink-0">
+      <!-- On mobile: Hidden if map tab is active. On desktop: Always flex. -->
+      <div 
+        class="flex-col md:flex md:w-96 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-900 shadow-xl z-10 shrink-0 h-full md:h-full w-full"
+        [class.hidden]="mobileTab() === 'map'"
+        [class.flex]="mobileTab() === 'editor'"
+      >
         <!-- Header -->
         <div class="p-4 border-b border-slate-800 flex items-center justify-between">
           <h1 class="text-lg font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
@@ -30,7 +61,7 @@ import { ViewerComponent } from './components/viewer.component';
             <input 
               [formControl]="topicControl" 
               (keydown.enter)="generateMap()"
-              placeholder="Enter a topic (e.g., 'React vs Angular')..." 
+              placeholder="Topic (e.g., 'React vs Angular')..." 
               class="flex-1 bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 transition-colors placeholder-slate-600"
             />
             <button 
@@ -57,7 +88,10 @@ import { ViewerComponent } from './components/viewer.component';
         <div class="flex-1 flex flex-col min-h-0">
           <div class="px-4 py-2 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center">
             <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Markdown Editor</span>
-            <button (click)="clearEditor()" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
+            <div class="flex gap-3">
+              <button (click)="copyToClipboard()" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">Copy</button>
+              <button (click)="clearEditor()" class="text-xs text-slate-500 hover:text-slate-300 transition-colors">Clear</button>
+            </div>
           </div>
           <textarea 
             [formControl]="markdownControl"
@@ -73,7 +107,12 @@ import { ViewerComponent } from './components/viewer.component';
       </div>
 
       <!-- Right Main: Viewer -->
-      <div class="flex-1 relative bg-slate-950">
+      <!-- On mobile: Hidden if editor tab is active. On desktop: Always flex. -->
+      <div 
+        class="md:flex flex-1 relative bg-slate-950 h-full w-full"
+        [class.hidden]="mobileTab() === 'editor'"
+        [class.flex]="mobileTab() === 'map'"
+      >
         <!-- Dot pattern background -->
         <div class="absolute inset-0 opacity-[0.03]" style="background-image: radial-gradient(#94a3b8 1px, transparent 1px); background-size: 24px 24px;"></div>
         
@@ -85,6 +124,9 @@ import { ViewerComponent } from './components/viewer.component';
 export class AppComponent {
   private parser = inject(MarkdownParserService);
   private gemini = inject(GeminiService);
+
+  // State for Mobile Navigation
+  readonly mobileTab = signal<string>('editor');
 
   topicControl = new FormControl('', { nonNullable: true });
   markdownControl = new FormControl(
@@ -118,6 +160,10 @@ export class AppComponent {
     });
   }
 
+  setMobileTab(tab: string) {
+    this.mobileTab.set(tab);
+  }
+
   async generateMap() {
     const topic = this.topicControl.value.trim();
     if (!topic) return;
@@ -128,12 +174,22 @@ export class AppComponent {
     try {
       const generatedMarkdown = await this.gemini.generateMindMapMarkdown(topic);
       this.markdownControl.setValue(generatedMarkdown);
+      
+      // Auto-switch to map view on mobile after generation
+      if (window.innerWidth < 768) {
+        this.setMobileTab('map');
+      }
     } catch (err) {
       this.errorMessage.set('Failed to generate. Check API Key.');
       console.error(err);
     } finally {
       this.isGenerating.set(false);
     }
+  }
+
+  copyToClipboard() {
+    const val = this.markdownControl.value;
+    navigator.clipboard.writeText(val);
   }
 
   clearEditor() {

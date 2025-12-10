@@ -1,11 +1,14 @@
 
-import { Component, ElementRef, effect, input, viewChild, HostListener, signal } from '@angular/core';
+import { Component, ElementRef, effect, input, viewChild, HostListener, signal, OnDestroy } from '@angular/core';
 import { MindMapNode } from '../services/markdown-parser.service';
 import { jsPDF } from 'jspdf';
 import * as d3 from 'd3';
 
 @Component({
   selector: 'app-viewer',
+  host: {
+    'class': 'block w-full h-full overflow-hidden'
+  },
   template: `
     <div class="w-full h-full bg-slate-950 relative overflow-hidden select-none group">
       <div #svgContainer class="w-full h-full cursor-grab active:cursor-grabbing"></div>
@@ -46,7 +49,7 @@ import * as d3 from 'd3';
     </div>
   `
 })
-export class ViewerComponent {
+export class ViewerComponent implements OnDestroy {
   data = input<MindMapNode>();
   svgContainer = viewChild<ElementRef>('svgContainer');
   isExporting = signal(false);
@@ -54,7 +57,8 @@ export class ViewerComponent {
   private svg: any;
   private g: any;
   private zoom: any;
-  private allNodes: any[] = []; 
+  private allNodes: any[] = [];
+  private resizeObserver: ResizeObserver | null = null;
   
   // Configuration
   private readonly MAX_LINE_CHARS = 24; 
@@ -65,14 +69,38 @@ export class ViewerComponent {
   constructor() {
     effect(() => {
       const mindMapData = this.data();
-      // Ensure container is ready
       if (mindMapData && this.svgContainer()) {
-        this.updateChart(mindMapData);
+        // Use setTimeout to ensure container has dimensions if just switched from hidden
+        setTimeout(() => this.updateChart(mindMapData), 50);
+      }
+    });
+
+    // Setup ResizeObserver to handle mobile tab switches and window resizes
+    effect(() => {
+      const el = this.svgContainer()?.nativeElement;
+      if (el) {
+        if (this.resizeObserver) this.resizeObserver.disconnect();
+        
+        this.resizeObserver = new ResizeObserver(() => {
+           if (this.data()) {
+             // Debounce slightly if needed
+             requestAnimationFrame(() => this.updateChart(this.data()!));
+           }
+        });
+        
+        this.resizeObserver.observe(el);
       }
     });
   }
 
+  ngOnDestroy() {
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
+  }
+
   private wrapText(text: string): string[] {
+    if (!text) return [''];
     const words = text.split(/\s+/);
     const lines: string[] = [];
     let currentLine = words[0];
@@ -90,8 +118,7 @@ export class ViewerComponent {
   }
 
   private processData(node: any) {
-    const lines = this.wrapText(node.name);
-    // Rough character width estimation
+    const lines = this.wrapText(node.name || 'Untitled');
     const maxLineLen = Math.max(...lines.map(l => l.length));
     const width = Math.max(140, (maxLineLen * 9) + this.NODE_PADDING_X * 2); 
     const height = (lines.length * this.LINE_HEIGHT) + this.NODE_PADDING_Y * 2;
@@ -114,144 +141,150 @@ export class ViewerComponent {
 
   private updateChart(rawData: MindMapNode) {
     const container = this.svgContainer()!.nativeElement;
-    // Clear previous
-    d3.select(container).selectAll('*').remove();
-
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
-    // 1. Pre-process dimensions
-    const processedRoot = this.mapData(rawData);
-
-    // 2. Split Data (Balanced Left/Right)
-    const rightChildren: any[] = [];
-    const leftChildren: any[] = [];
-
-    if (processedRoot.children) {
-      processedRoot.children.forEach((child: any, i: number) => {
-        if (i % 2 === 0) rightChildren.push(child);
-        else leftChildren.push(child);
-      });
-    }
-
-    const rightRoot = d3.hierarchy({ ...processedRoot, children: rightChildren });
-    const leftRoot = d3.hierarchy({ ...processedRoot, children: leftChildren });
-
-    // 3. Layout Configuration
-    // dx: Vertical spacing (Node Height + Gap). 220px ensures tall nodes don't overlap vertically.
-    // dy: Horizontal spacing (Node Width + Gap). 350px ensures wide nodes don't overlap horizontally.
-    const dx = 220; 
-    const dy = 350; 
-
-    const tree = d3.tree()
-      .nodeSize([dx, dy])
-      .separation((a: any, b: any) => {
-          // Increase separation for different parents (cousins) to prevent branch overlap
-          return a.parent === b.parent ? 1.1 : 2.5; 
-      });
-
-    tree(rightRoot);
-    tree(leftRoot);
-
-    // Invert left side
-    leftRoot.descendants().forEach((d: any) => {
-      d.y = -d.y;
-    });
-
-    // Merge
-    const nodes = rightRoot.descendants().concat(leftRoot.descendants().slice(1));
-    const links = rightRoot.links().concat(leftRoot.links());
     
-    this.allNodes = nodes;
+    if (container.clientWidth === 0 || container.clientHeight === 0) return;
 
-    // 4. Drawing
-    const colorScale = d3.scaleOrdinal()
-        .range(["#60a5fa", "#34d399", "#f472b6", "#a78bfa", "#fbbf24", "#f87171"]);
+    try {
+      d3.select(container).selectAll('*').remove();
 
-    this.zoom = d3.zoom()
-      .scaleExtent([0.05, 4])
-      .on('zoom', (event: any) => {
-        this.g.attr('transform', event.transform);
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      // 1. Pre-process dimensions
+      const processedRoot = this.mapData(rawData);
+
+      // 2. Split Data (Balanced Left/Right)
+      const rightChildren: any[] = [];
+      const leftChildren: any[] = [];
+
+      if (processedRoot.children) {
+        processedRoot.children.forEach((child: any, i: number) => {
+          if (i % 2 === 0) rightChildren.push(child);
+          else leftChildren.push(child);
+        });
+      }
+
+      // Important: Cloning logic to ensure D3 modifies unique objects
+      const rightRoot = d3.hierarchy({ ...processedRoot, children: rightChildren });
+      const leftRoot = d3.hierarchy({ ...processedRoot, children: leftChildren });
+
+      // 3. Layout Configuration
+      const dx = 220; 
+      const dy = 350; 
+
+      const tree = d3.tree()
+        .nodeSize([dx, dy])
+        .separation((a: any, b: any) => {
+            return a.parent === b.parent ? 1.1 : 2.5; 
+        });
+
+      tree(rightRoot);
+      tree(leftRoot);
+
+      // Invert left side (horizontal flip of y-coordinate which represents x-axis in our visual map)
+      leftRoot.descendants().forEach((d: any) => {
+        d.y = -d.y;
       });
 
-    this.svg = d3.select(container)
-      .append('svg')
-      .attr('width', '100%')
-      .attr('height', '100%')
-      .attr('viewBox', [0, 0, width, height])
-      .call(this.zoom)
-      .on("dblclick.zoom", null);
+      // Merge nodes - skip root of left side to avoid duplicate
+      const nodes = rightRoot.descendants().concat(leftRoot.descendants().slice(1));
+      const links = rightRoot.links().concat(leftRoot.links());
+      
+      this.allNodes = nodes;
 
-    this.svg.append("rect")
-        .attr("width", width)
-        .attr("height", height)
-        .style("fill", "none")
-        .style("pointer-events", "all");
+      // 4. Drawing
+      const colorScale = d3.scaleOrdinal()
+          .range(["#60a5fa", "#34d399", "#f472b6", "#a78bfa", "#fbbf24", "#f87171"]);
 
-    this.g = this.svg.append('g')
-      .attr('transform', `translate(${width / 2},${height / 2})`);
+      this.zoom = d3.zoom()
+        .scaleExtent([0.05, 4])
+        .on('zoom', (event: any) => {
+          this.g.attr('transform', event.transform);
+        });
 
-    // Draw Links
-    this.g.selectAll('.link')
-      .data(links)
-      .enter()
-      .append('path')
-      .attr('class', 'link')
-      .attr('fill', 'none')
-      .attr('stroke', '#475569')
-      .attr('stroke-width', 1.5)
-      .attr('opacity', 0.5)
-      .attr('d', d3.linkHorizontal()
-          .x((d: any) => d.y)
-          .y((d: any) => d.x)
-      );
+      this.svg = d3.select(container)
+        .append('svg')
+        .attr('width', '100%')
+        .attr('height', '100%')
+        .attr('viewBox', [0, 0, width, height])
+        .call(this.zoom)
+        .on("dblclick.zoom", null);
 
-    // Draw Nodes
-    const node = this.g.selectAll('.node')
-      .data(nodes)
-      .enter()
-      .append('g')
-      .attr('class', 'node')
-      .attr('transform', (d: any) => `translate(${d.y},${d.x})`);
+      this.svg.append("rect")
+          .attr("width", width)
+          .attr("height", height)
+          .style("fill", "none")
+          .style("pointer-events", "all");
 
-    // Node Background
-    node.append('rect')
-      .attr('rx', 12)
-      .attr('ry', 12)
-      .attr('x', (d: any) => -d.data._width / 2) 
-      .attr('y', (d: any) => -d.data._height / 2)
-      .attr('width', (d: any) => d.data._width)
-      .attr('height', (d: any) => d.data._height)
-      .attr('fill', '#1e293b') // Dark slate background
-      .attr('stroke', (d: any) => colorScale(d.depth))
-      .attr('stroke-width', 2)
-      .style('filter', 'drop-shadow(0 4px 6px rgba(0,0,0,0.3))');
+      this.g = this.svg.append('g')
+        .attr('transform', `translate(${width / 2},${height / 2})`);
 
-    // Node Text
-    const textGroup = node.append('text')
-      .attr('text-anchor', 'middle')
-      .style('font-family', 'ui-sans-serif, system-ui, sans-serif')
-      .style('font-size', '14px')
-      .style('font-weight', '500')
-      .style('fill', '#f1f5f9');
+      // Draw Links
+      this.g.selectAll('.link')
+        .data(links)
+        .enter()
+        .append('path')
+        .attr('class', 'link')
+        .attr('fill', 'none')
+        .attr('stroke', '#475569')
+        .attr('stroke-width', 1.5)
+        .attr('opacity', 0.5)
+        .attr('d', d3.linkHorizontal()
+            .x((d: any) => d.y)
+            .y((d: any) => d.x)
+        );
 
-    textGroup.each(function(d: any) {
-       const el = d3.select(this);
-       const lines = d.data._lines;
-       const lineHeight = 20;
-       const totalTextHeight = lines.length * lineHeight;
-       // Vertical centering adjustment
-       let startY = -(totalTextHeight / 2) + (lineHeight / 3); 
+      // Draw Nodes
+      const node = this.g.selectAll('.node')
+        .data(nodes)
+        .enter()
+        .append('g')
+        .attr('class', 'node')
+        .attr('transform', (d: any) => `translate(${d.y},${d.x})`);
 
-       lines.forEach((line: string, i: number) => {
-         el.append('tspan')
-           .attr('x', 0)
-           .attr('dy', i === 0 ? startY + (lineHeight/2) : lineHeight)
-           .text(line);
-       });
-    });
+      // Node Background
+      node.append('rect')
+        .attr('rx', 12)
+        .attr('ry', 12)
+        .attr('x', (d: any) => -d.data._width / 2) 
+        .attr('y', (d: any) => -d.data._height / 2)
+        .attr('width', (d: any) => d.data._width)
+        .attr('height', (d: any) => d.data._height)
+        .attr('fill', '#1e293b')
+        .attr('stroke', (d: any) => colorScale(d.depth))
+        .attr('stroke-width', 2)
+        .style('filter', 'drop-shadow(0 4px 6px rgba(0,0,0,0.3))');
 
-    this.resetZoom();
+      // Node Text
+      const textGroup = node.append('text')
+        .attr('text-anchor', 'middle')
+        .style('font-family', 'ui-sans-serif, system-ui, sans-serif')
+        .style('font-size', '14px')
+        .style('font-weight', '500')
+        .style('fill', '#f1f5f9');
+
+      textGroup.each(function(d: any) {
+         const el = d3.select(this);
+         const lines = d.data._lines;
+         const lineHeight = 20;
+         const totalTextHeight = lines.length * lineHeight;
+         let startY = -(totalTextHeight / 2) + (lineHeight / 3); 
+
+         lines.forEach((line: string, i: number) => {
+           el.append('tspan')
+             .attr('x', 0)
+             .attr('dy', i === 0 ? startY + (lineHeight/2) : lineHeight)
+             .text(line);
+         });
+      });
+
+      // Only reset zoom on initial render or if explicitly requested
+      if (!this.svg.node().__zoom) {
+         this.resetZoom();
+      }
+    } catch (e) {
+      console.error('D3 Rendering Error:', e);
+    }
   }
 
   resetZoom() {
